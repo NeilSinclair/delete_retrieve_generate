@@ -106,7 +106,8 @@ def extract_attributes(line, attribute_vocab, use_ngrams=False):
                 attribute_markers.append(marker)
                 content = content.replace(marker, "")
         content = content.split()
-        
+    ### Change this so that we take the whole content sentence and then split it and then we take
+    ### the whole attribute sentences and do whatveer we need to do (Might be different for the above)    
     else:
         content = []
         attribute_markers = []
