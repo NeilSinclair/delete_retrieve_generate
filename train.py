@@ -8,11 +8,12 @@ import os
 import time
 import numpy as np
 import glob
+import pandas as pd
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from tensorboardX import SummaryWriter
+# from tensorboardX import SummaryWriter
 
 import src.evaluation as evaluation
 from src.cuda import CUDA
@@ -37,6 +38,14 @@ parser.add_argument(
     help="train continuously on one batch of data",
     action='store_true'
 )
+
+parser.add_argument(
+    "--create_sim_matrix",
+    help='just create the similarity matrix to speed up training',
+    action='store_true'
+    
+)
+
 args = parser.parse_args()
 config = json.load(open(args.config, 'r'))
 
@@ -115,7 +124,7 @@ model, start_epoch = models.attempt_load_model(
 if CUDA:
     model = model.cuda()
 
-writer = SummaryWriter(working_dir)
+# writer = SummaryWriter(working_dir)
 
 
 if config['training']['optimizer'] == 'adam':
@@ -136,105 +145,133 @@ best_epoch = 0
 cur_metric = 0.0 # log perplexity or BLEU
 num_examples = min(len(src['content']), len(tgt['content']))
 num_batches = num_examples / batch_size
+sim_lookup_table = config['data']['sim_lookup_table']
 
-STEP = 0
-for epoch in range(start_epoch, config['training']['epochs']):
-    if cur_metric > best_metric:
-        # rm old checkpoint
-        for ckpt_path in glob.glob(working_dir + '/model.*'):
-            os.system("rm %s" % ckpt_path)
-        # replace with new checkpoint
-        torch.save(model.state_dict(), working_dir + '/model.%s.ckpt' % epoch)
-
-        best_metric = cur_metric
-        best_epoch = epoch - 1
-
-    losses = []
+# Just create the similarity matrix if the option was passed as an argument
+if args.create_sim_matrix:
+    print(' --- Generating similarity matrix ---')
+    start_time = time.time()
     for i in range(0, num_examples, batch_size):
-
-        if args.overfit:
-            i = 50
-
+        
         batch_idx = i / batch_size
 
         input_content, input_aux, output = data.minibatch(
-            src, tgt, i, batch_size, max_length, config['model']['model_type'])
-        input_lines_src, _, srclens, srcmask, _ = input_content
-        input_ids_aux, _, auxlens, auxmask, _ = input_aux
-        input_lines_tgt, output_lines_tgt, _, _, _ = output
-        
-        decoder_logit, decoder_probs = model(
-            input_lines_src, input_lines_tgt, srcmask, srclens,
-            input_ids_aux, auxlens, auxmask)
+            src, tgt, i, batch_size, max_length, config['model']['model_type'],
+            gen_sim_matrix=True)
+        if batch_idx % 5 == 0 and batch_idx != 0:
+            print(f'Currently on batch {batch_idx} of {num_examples/batch_size}')
+            mins = int((time.time() - start_time) // 60)
+            secs = int((time.time() - start_time) % 60)
+            print(f'Time elapsed: {mins}m{secs}s')
+            start_time = time.time()
 
-        optimizer.zero_grad()
-
-        loss = loss_criterion(
-            decoder_logit.contiguous().view(-1, tgt_vocab_size),
-            output_lines_tgt.view(-1)
-        )
-
-        losses.append(loss.item())
-        losses_since_last_report.append(loss.item())
-        epoch_loss.append(loss.item())
-        loss.backward()
-        norm = nn.utils.clip_grad_norm_(model.parameters(), config['training']['max_norm'])
-
-        writer.add_scalar('stats/grad_norm', norm, STEP)
-
-        optimizer.step()
-
-        if args.overfit or batch_idx % config['training']['batches_per_report'] == 0:
-
-            s = float(time.time() - start_since_last_report)
-            eps = (batch_size * config['training']['batches_per_report']) / s
-            avg_loss = np.mean(losses_since_last_report)
-            info = (epoch, batch_idx, num_batches, eps, avg_loss, cur_metric)
-            writer.add_scalar('stats/EPS', eps, STEP)
-            writer.add_scalar('stats/loss', avg_loss, STEP)
-            logging.info('EPOCH: %s ITER: %s/%s EPS: %.2f LOSS: %.4f METRIC: %.4f' % info)
-            start_since_last_report = time.time()
-            words_since_last_report = 0
-            losses_since_last_report = []
-
-        # NO SAMPLING!! because weird train-vs-test data stuff would be a pain
-        STEP += 1
-    if args.overfit:
-        continue
-
-    logging.info('EPOCH %s COMPLETE. EVALUATING...' % epoch)
-    start = time.time()
-    model.eval()
-    dev_loss = evaluation.evaluate_lpp(
-            model, src_test, tgt_test, config)
-
-    writer.add_scalar('eval/loss', dev_loss, epoch)
-
-    if args.bleu and epoch >= config['training'].get('inference_start_epoch', 1):
-        cur_metric, edit_distance, inputs, preds, golds, auxs = evaluation.inference_metrics(
-            model, src_test, tgt_test, config)
-
-        with open(working_dir + '/auxs.%s' % epoch, 'w') as f:
-            f.write('\n'.join(auxs) + '\n')
-        with open(working_dir + '/inputs.%s' % epoch, 'w') as f:
-            f.write('\n'.join(inputs) + '\n')
-        with open(working_dir + '/preds.%s' % epoch, 'w') as f:
-            f.write('\n'.join(preds) + '\n')
-        with open(working_dir + '/golds.%s' % epoch, 'w') as f:
-            f.write('\n'.join(golds) + '\n')
-
-        writer.add_scalar('eval/edit_distance', edit_distance, epoch)
-        writer.add_scalar('eval/bleu', cur_metric, epoch)
-
+else:
+    print(' --- Training model --- ')
+    if len(sim_lookup_table) > 0:
+        sim_lookup_table = pd.read_csv(sim_lookup_table)
+        use_sim_matrix = True
     else:
-        cur_metric = dev_loss
+        use_sim_matrix = False
+        sim_lookup_table = None
+    STEP = 0
+    for epoch in range(start_epoch, config['training']['epochs']):
+        if cur_metric > best_metric:
+            # rm old checkpoint
+            for ckpt_path in glob.glob(working_dir + '/model.*'):
+                os.system("rm %s" % ckpt_path)
+            # replace with new checkpoint
+            torch.save(model.state_dict(), working_dir + '/model.%s.ckpt' % epoch)
 
-    model.train()
+            best_metric = cur_metric
+            best_epoch = epoch - 1
 
-    logging.info('METRIC: %s. TIME: %.2fs CHECKPOINTING...' % (
-        cur_metric, (time.time() - start)))
-    avg_loss = np.mean(epoch_loss)
-    epoch_loss = []
+        losses = []
+        for i in range(0, num_examples, batch_size):
 
-writer.close()
+            if args.overfit:
+                i = 50
+
+            batch_idx = i / batch_size
+
+            input_content, input_aux, output = data.minibatch(
+                src, tgt, i, batch_size, max_length, config['model']['model_type'],
+                use_sim_matrix=use_sim_matrix, sim_lookup_table=sim_lookup_table)
+            input_lines_src, _, srclens, srcmask, _ = input_content
+            input_ids_aux, _, auxlens, auxmask, _ = input_aux
+            input_lines_tgt, output_lines_tgt, _, _, _ = output
+            
+            decoder_logit, decoder_probs = model(
+                input_lines_src, input_lines_tgt, srcmask, srclens,
+                input_ids_aux, auxlens, auxmask)
+
+            optimizer.zero_grad()
+
+            loss = loss_criterion(
+                decoder_logit.contiguous().view(-1, tgt_vocab_size),
+                output_lines_tgt.view(-1)
+            )
+
+            losses.append(loss.item())
+            losses_since_last_report.append(loss.item())
+            epoch_loss.append(loss.item())
+            loss.backward()
+            norm = nn.utils.clip_grad_norm_(model.parameters(), config['training']['max_norm'])
+
+            # writer.add_scalar('stats/grad_norm', norm, STEP)
+
+            optimizer.step()
+
+            if args.overfit or batch_idx % config['training']['batches_per_report'] == 0:
+
+                s = float(time.time() - start_since_last_report)
+                eps = (batch_size * config['training']['batches_per_report']) / s
+                avg_loss = np.mean(losses_since_last_report)
+                info = (epoch, batch_idx, num_batches, eps, avg_loss, cur_metric)
+                # writer.add_scalar('stats/EPS', eps, STEP)
+                # writer.add_scalar('stats/loss', avg_loss, STEP)
+                logging.info('EPOCH: %s ITER: %s/%s EPS: %.2f LOSS: %.4f METRIC: %.4f' % info)
+                start_since_last_report = time.time()
+                words_since_last_report = 0
+                losses_since_last_report = []
+
+            # NO SAMPLING!! because weird train-vs-test data stuff would be a pain
+            STEP += 1
+        if args.overfit:
+            continue
+
+        logging.info('EPOCH %s COMPLETE. EVALUATING...' % epoch)
+        start = time.time()
+        model.eval()
+        dev_loss = evaluation.evaluate_lpp(
+                model, src_test, tgt_test, config)
+
+        # writer.add_scalar('eval/loss', dev_loss, epoch)
+
+        if args.bleu and epoch >= config['training'].get('inference_start_epoch', 1):
+            cur_metric, edit_distance, inputs, preds, golds, auxs = evaluation.inference_metrics(
+                model, src_test, tgt_test, config)
+
+            with open(working_dir + '/auxs.%s' % epoch, 'w') as f:
+                f.write('\n'.join(auxs) + '\n')
+            with open(working_dir + '/inputs.%s' % epoch, 'w') as f:
+                f.write('\n'.join(inputs) + '\n')
+            with open(working_dir + '/preds.%s' % epoch, 'w') as f:
+                f.write('\n'.join(preds) + '\n')
+            with open(working_dir + '/golds.%s' % epoch, 'w') as f:
+                f.write('\n'.join(golds) + '\n')
+
+            # writer.add_scalar('eval/edit_distance', edit_distance, epoch)
+            # writer.add_scalar('eval/bleu', cur_metric, epoch)
+
+        else:
+            cur_metric = dev_loss
+
+        model.train()
+
+        logging.info('METRIC: %s. TIME: %.2fs CHECKPOINTING...' % (
+            cur_metric, (time.time() - start)))
+        avg_loss = np.mean(epoch_loss)
+        epoch_loss = []
+
+    # writer.close()
 

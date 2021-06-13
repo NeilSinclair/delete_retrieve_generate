@@ -4,6 +4,8 @@ import random
 import numpy as np
 from nltk import ngrams
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
+import pandas as pd
+import re
 
 import torch
 from torch.autograd import Variable
@@ -32,13 +34,19 @@ class CorpusSearcher(object):
 
         query = self.query_corpus[key_idx]
         query_vec = self.vectorizer.transform([query])
-
+        # print(f'DEBUG: len(query) {len(query)}')
         scores = np.dot(self.key_corpus_matrix, query_vec.T)
         scores = np.squeeze(scores.toarray())
+        # print(f'DEBUG: scores {scores}')
+        # print(f'scores.size: {scores.size}')
         scores_indices = zip(scores, range(len(scores)))
+        # Get the top n scores
         selected = sorted(scores_indices, reverse=True)[:n]
 
         # use the retrieved i to pick examples from the VALUE corpus
+        # create a tuple of the ranked attributed in the document, Value_corpus is the corpus of attributes (other
+        # than the current one), i is the index of the score (relative to all the text in the document) and score is
+        # the similarity score
         selected = [
             #(self.query_corpus[i], self.key_corpus[i], self.value_corpus[i], i, score) # useful for debugging 
             (self.value_corpus[i], i, score) 
@@ -122,27 +130,44 @@ def extract_attributes(line, attribute_vocab, use_ngrams=False):
 
 def read_nmt_data(src, config, tgt, attribute_vocab, train_src=None, train_tgt=None,
         ngram_attributes=False):
+    ### --- need to fix up this n-gram attributed --- ###
+    # It looks like what's happening here is that this creates a dictionary of 
+    # pre_attr["doesn't do"] = pre_salience and pre_attr["doesn't do"] = post_salience
+    # where "doesn't do" is an example ngram
+    # If it's not in ngram mode, then the pre-attr = post-attr = the vocab word
+    # The salience is used to delete the ngrams, starting with the most salient, however, because the 
+    # sentences from the rationales method are matched with their style words, I'm going to abandon this method
 
-    if ngram_attributes:
-        # read attribute vocab as a dictionary mapping attributes to scores
-        pre_attr = {}
-        post_attr = {}
-        with open(attribute_vocab) as attr_file:
-            next(attr_file) # skip header
-            for line in attr_file:
-                parts = line.strip().split()
-                pre_salience = float(parts[-2])
-                post_salience = float(parts[-1])
-                attr = ' '.join(parts[:-2])
-                pre_attr[attr] = pre_salience
-                post_attr[attr] = post_salience
-    else:
-        pre_attr = post_attr = set([x.strip() for x in open(attribute_vocab)])
+    # if ngram_attributes:
+    #     # read attribute vocab as a dictionary mapping attributes to scores
+    #     pre_attr = {}
+    #     post_attr = {}
+    #     with open(attribute_vocab) as attr_file:
+    #         next(attr_file) # skip header
+    #         for line in attr_file:
+    #             parts = line.strip().split()
+    #             pre_salience = float(parts[-2])
+    #             post_salience = float(parts[-1])
+    #             attr = ' '.join(parts[:-2])
+    #             pre_attr[attr] = pre_salience
+    #             post_attr[attr] = post_salience
+    # else:
+    #     pre_attr = post_attr = set([x.strip() for x in open(attribute_vocab)])
+    # ### --- This needs to change such that, for each line in the csv file
+    # ### --- 
+    # src_lines = [l.strip().lower().split() for l in open(src, 'r')]
+    # src_lines, src_content, src_attribute = list(zip(
+    #     *[extract_attributes(line, pre_attr, pre_attr) for line in src_lines]
+    # ))
+    # Get the items from the pandas dataframe
+    src = pd.read_csv(src)
+    src = src.dropna(axis=0)
+    # src_lines, src_content, src_attribute = list(zip([src.Target.values, src.Masked.values, 
+    #     src.Masked_Words.values]))
+    src_lines, src_content, src_attribute = [[t_.split() for t_ in src.Target.values],
+                                            [t_.split() for t_ in src.Masked.values], 
+                                            [t_.split() for t_ in src.Masked_Words.values]]
 
-    src_lines = [l.strip().lower().split() for l in open(src, 'r')]
-    src_lines, src_content, src_attribute = list(zip(
-        *[extract_attributes(line, pre_attr, pre_attr) for line in src_lines]
-    ))
     src_tok2id, src_id2tok = build_vocab_maps(config['data']['src_vocab'])
     # train time: just pick attributes that are close to the current (using word distance)
     # we never need to do the TFIDF thing with the source because 
@@ -161,10 +186,17 @@ def read_nmt_data(src, config, tgt, attribute_vocab, train_src=None, train_tgt=N
         'tok2id': src_tok2id, 'id2tok': src_id2tok, 'dist_measurer': src_dist_measurer
     }
 
-    tgt_lines = [l.strip().lower().split() for l in open(tgt, 'r')] if tgt else None
-    tgt_lines, tgt_content, tgt_attribute = list(zip(
-        *[extract_attributes(line, post_attr, post_attr) for line in tgt_lines]
-    ))
+    # tgt_lines = [l.strip().lower().split() for l in open(tgt, 'r')] if tgt else None
+    # tgt_lines, tgt_content, tgt_attribute = list(zip(
+    #     *[extract_attributes(line, post_attr, post_attr) for line in tgt_lines]
+    # ))
+    tgt = pd.read_csv(tgt)
+    tgt = tgt.dropna(axis=0)
+    # tgt_lines, tgt_content, tgt_attribute = list(zip([tgt.Target.values, tgt.Masked.values, 
+    #     tgt.Masked_Words.values]))
+    tgt_lines, tgt_content, tgt_attribute = [[t_.split() for t_ in tgt.Target.values],
+                                            [t_.split() for t_ in tgt.Masked.values], 
+                                            [t_.split() for t_ in tgt.Masked_Words.values]]
     tgt_tok2id, tgt_id2tok = build_vocab_maps(config['data']['tgt_vocab'])
     # train time: just pick attributes that are close to the current (using word distance)
     # because this is only used to noise the inputs
@@ -180,7 +212,7 @@ def read_nmt_data(src, config, tgt, attribute_vocab, train_src=None, train_tgt=N
     else:
         tgt_dist_measurer = CorpusSearcher(
             query_corpus=[' '.join(x) for x in src_content],
-            key_corpus=[' '.join(x) for x in train_tgt['content']],
+            key_corpus=[' '.join(x) for x in str(train_tgt['content'])],
             value_corpus=[' '.join(x) for x in train_tgt['attribute']],
             vectorizer=TfidfVectorizer(vocabulary=tgt_tok2id),
             make_binary=False
@@ -191,37 +223,57 @@ def read_nmt_data(src, config, tgt, attribute_vocab, train_src=None, train_tgt=N
     }
     return src, tgt
 
-def sample_replace(lines, dist_measurer, sample_rate, corpus_idx):
+def sample_replace(lines, dist_measurer, sample_rate, corpus_idx, gen_sim_matrix=False, use_sim_matrix=False, 
+                    sim_lookup_table=None):
     """
     replace sample_rate * batch_size lines with nearby examples (according to dist_measurer)
     not exactly the same as the paper (words shared instead of jaccaurd during train) but same idea
+    method: pass in a batch of lines, then calculate the similarity of each of those lines to every other
+        set of attributes in the document
     """
     out = [None for _ in range(len(lines))]
     for i, line in enumerate(lines):
+        original_line = line
         if random.random() < sample_rate:
-            # top match is the current line
-            sims = dist_measurer.most_similar(corpus_idx + i)[1:]
-            
-            try:
-                line = next( (
-                    tgt_attr.split() for tgt_attr, _, _ in sims
-                    if set(tgt_attr.split()) != set(line[1:-1]) # and tgt_attr != ''   # TODO -- exclude blanks?
-                ) )
-            # all the matches are blanks
-            except StopIteration:
-                line = []
-            line = ['<s>'] + line + ['</s>']
+            if use_sim_matrix:
+                # lookup_val = "['<s>','" + str(line) + "','</s>']"
+                lookup_val = str(line)
+                line = re.sub(r"\[|\]|'", "", sim_lookup_table.loc[lookup_val, "most_similar"]).split(', ')
+            else:
+                # top match is the current line
+                sims = dist_measurer.most_similar(corpus_idx + i)[1:]
+                
+                try:
+                    # here we are changing the line (perturbing it) for that random effect
+                    # So, we look for the closest set of attributes that don't have the same attributes
+                    # as the current one, and if they don't, we set that to be the set of attributes for the
+                    # sentence
+                    line = next( (
+                        tgt_attr.split() for tgt_attr, _, _ in sims
+                        if set(tgt_attr.split()) != set(line[1:-1]) # and tgt_attr != ''   # TODO -- exclude blanks?
+                    ) )
+                # all the matches are blanks
+                except StopIteration:
+                    line = []
+                line = ['<s>'] + line + ['</s>']
 
         # corner case: special tok for empty sequences (just start/end tok)
         if len(line) == 2:
             line.insert(1, '<empty>')
+        line_closest_pair = str(original_line) + '\t' + str(line) + '\n'
         out[i] = line
-
+    # If we're generating the similarity matrix, write out to file
+    if gen_sim_matrix:
+        if not os.path.exists('working_dir/'):
+            os.makedirs('working_dir/')
+        with open('working_dir/similarity_matrix.txt', 'a') as f:
+            f.write(line_closest_pair)
     return out
 
 
 def get_minibatch(lines, tok2id, index, batch_size, max_len, sort=False, idx=None,
-        dist_measurer=None, sample_rate=0.0):
+        dist_measurer=None, sample_rate=0.0, gen_sim_matrix=False, use_sim_matrix=False,
+        sim_lookup_table=None):
     """Prepare minibatch."""
     # FORCE NO SORTING because we care about the order of outputs
     #   to compare across systems
@@ -231,7 +283,8 @@ def get_minibatch(lines, tok2id, index, batch_size, max_len, sort=False, idx=Non
     ]
 
     if dist_measurer is not None:
-        lines = sample_replace(lines, dist_measurer, sample_rate, index)
+        lines = sample_replace(lines, dist_measurer, sample_rate, index, gen_sim_matrix,
+                                use_sim_matrix, sim_lookup_table)
 
     lens = [len(line) - 1 for line in lines]
     max_len = max(lens)
@@ -276,7 +329,8 @@ def get_minibatch(lines, tok2id, index, batch_size, max_len, sort=False, idx=Non
     return input_lines, output_lines, lens, mask, idx
 
 
-def minibatch(src, tgt, idx, batch_size, max_len, model_type, is_test=False):
+def minibatch(src, tgt, idx, batch_size, max_len, model_type, is_test=False, gen_sim_matrix=False,
+              use_sim_matrix=False, sim_lookup_table=None):
     if not is_test:
         use_src = random.random() < 0.5
         in_dataset = src if use_src else tgt
@@ -318,10 +372,14 @@ def minibatch(src, tgt, idx, batch_size, max_len, model_type, is_test=False):
                 batch_size, max_len, idx=inputs[-1],
                 dist_measurer=out_dataset['dist_measurer'], sample_rate=1.0)
         else:
+            # If we're generating the similarity matrix, then we need to run this for every line
+            sample_rate = 1 if gen_sim_matrix else 0.1
             attributes =  get_minibatch(
                 out_dataset['attribute'], out_dataset['tok2id'], idx, 
                 batch_size, max_len, idx=inputs[-1],
-                dist_measurer=out_dataset['dist_measurer'], sample_rate=0.1)
+                dist_measurer=out_dataset['dist_measurer'], sample_rate=sample_rate,
+                gen_sim_matrix=gen_sim_matrix, use_sim_matrix=use_sim_matrix,
+                sim_lookup_table=sim_lookup_table)
 
     elif model_type == 'seq2seq':
         # ignore the in/out dataset stuff
