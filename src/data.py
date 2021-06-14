@@ -186,8 +186,8 @@ def read_nmt_data(src, config, tgt, attribute_vocab, train_src=None, train_tgt=N
     else:
         tgt_dist_measurer = CorpusSearcher(
             query_corpus=[' '.join(x) for x in src_content],
-            key_corpus=[' '.join(x) for x in str(train_tgt['content'])],
-            value_corpus=[' '.join(x) for x in str(train_tgt['attribute'])],
+            key_corpus=[' '.join(x) for x in train_tgt['content']],
+            value_corpus=[' '.join(x) for x in train_tgt['attribute']],
             vectorizer=TfidfVectorizer(vocabulary=tgt_tok2id),
             make_binary=False
         )

@@ -12,7 +12,7 @@
     "src": "data/yelp/yelp_train_20.0",
     "tgt": "data/yelp/yelp_train_20.1",
     "src_test": "data/yelp/yelp_test_20.0",
-    "tgt_test": "data/yelp/yelp_train_20.1",
+    "tgt_test": "data/yelp/yelp_test_20.1",
     "src_vocab": "data/yelp/vocab",
     "tgt_vocab": "data/yelp/vocab",
     "share_vocab": true,
