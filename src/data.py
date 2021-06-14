@@ -137,28 +137,6 @@ def read_nmt_data(src, config, tgt, attribute_vocab, train_src=None, train_tgt=N
     # If it's not in ngram mode, then the pre-attr = post-attr = the vocab word
     # The salience is used to delete the ngrams, starting with the most salient, however, because the 
     # sentences from the rationales method are matched with their style words, I'm going to abandon this method
-
-    # if ngram_attributes:
-    #     # read attribute vocab as a dictionary mapping attributes to scores
-    #     pre_attr = {}
-    #     post_attr = {}
-    #     with open(attribute_vocab) as attr_file:
-    #         next(attr_file) # skip header
-    #         for line in attr_file:
-    #             parts = line.strip().split()
-    #             pre_salience = float(parts[-2])
-    #             post_salience = float(parts[-1])
-    #             attr = ' '.join(parts[:-2])
-    #             pre_attr[attr] = pre_salience
-    #             post_attr[attr] = post_salience
-    # else:
-    #     pre_attr = post_attr = set([x.strip() for x in open(attribute_vocab)])
-    # ### --- This needs to change such that, for each line in the csv file
-    # ### --- 
-    # src_lines = [l.strip().lower().split() for l in open(src, 'r')]
-    # src_lines, src_content, src_attribute = list(zip(
-    #     *[extract_attributes(line, pre_attr, pre_attr) for line in src_lines]
-    # ))
     # Get the items from the pandas dataframe
     src = pd.read_csv(src)
     src = src.dropna(axis=0)
@@ -186,14 +164,10 @@ def read_nmt_data(src, config, tgt, attribute_vocab, train_src=None, train_tgt=N
         'tok2id': src_tok2id, 'id2tok': src_id2tok, 'dist_measurer': src_dist_measurer
     }
 
-    # tgt_lines = [l.strip().lower().split() for l in open(tgt, 'r')] if tgt else None
-    # tgt_lines, tgt_content, tgt_attribute = list(zip(
-    #     *[extract_attributes(line, post_attr, post_attr) for line in tgt_lines]
-    # ))
+
     tgt = pd.read_csv(tgt)
     tgt = tgt.dropna(axis=0)
-    # tgt_lines, tgt_content, tgt_attribute = list(zip([tgt.Target.values, tgt.Masked.values, 
-    #     tgt.Masked_Words.values]))
+
     tgt_lines, tgt_content, tgt_attribute = [[t_.split() for t_ in tgt.Target.values],
                                             [t_.split() for t_ in tgt.Masked.values], 
                                             [t_.split() for t_ in tgt.Masked_Words.values]]
@@ -213,7 +187,7 @@ def read_nmt_data(src, config, tgt, attribute_vocab, train_src=None, train_tgt=N
         tgt_dist_measurer = CorpusSearcher(
             query_corpus=[' '.join(x) for x in src_content],
             key_corpus=[' '.join(x) for x in str(train_tgt['content'])],
-            value_corpus=[' '.join(x) for x in train_tgt['attribute']],
+            value_corpus=[' '.join(x) for x in str(train_tgt['attribute'])],
             vectorizer=TfidfVectorizer(vocabulary=tgt_tok2id),
             make_binary=False
         )
