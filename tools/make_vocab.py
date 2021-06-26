@@ -15,6 +15,7 @@ print('</s>')
 c = Counter()
 for l in open(sys.argv[1]):
     for tok in l.strip().split():
+        tok = tok.replace('"', '')
         c[tok] += 1
 
 for tok, _ in c.most_common(int(sys.argv[2])):
