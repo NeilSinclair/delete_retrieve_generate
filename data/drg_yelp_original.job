@@ -1,0 +1,26 @@
+#!/bin/bash
+#PBS -l select=1:ncpus=10:ngpus=1
+#PBS -P CSCI1335
+#PBS -q gpu_1
+#PBS -l walltime=12:00:00
+
+echo activating conda
+
+source activate drg_env
+conda activate drg_env
+
+module purge
+module load chpc/python/anaconda/3-2019.10
+module load gcc/7.3.0
+
+cd ~/lustre/DRG_original/delete_retrieve_generate
+
+pwd
+
+python -m interpretable_predictions.latent_rationale.sst.train --model latent --selection 0.2 --batch_size 128 --dataset_name yelp_20 --num_iterations -20 --save_path ./saved_models --rationale_train_data_neg ./interpretable_predictions/raw_data/yelp.train.0 --rationale_train_data_pos ./interpretable_predictions/raw_data/yelp.train.1 --rationale_test_data_neg ./interpretable_predictions/raw_data/yelp.test.0 --rationale_test_data_pos ./interpretable_predictions/raw_data/yelp.test.1 --rationale_dev_data_neg ./interpretable_predictions/raw_data/yelp.dev.0 --rationale_dev_data_pos ./interpretable_predictions/raw_data/yelp.dev.1
+
+python create_dataset.py --train_rationale_model 0 --dataset yelp_20 --percent_noising 0.2
+
+python ./src/main.py --dataset yelp_20
+
+python ./src/test_eval.py --dataset yelp_20 --translation_model_path ./saved_models/yelp_20_lm_translation.pt --test_path ./data/yelp_test_20.csv --classifier_path ./saved_models/yelp_15_classifier.pt
