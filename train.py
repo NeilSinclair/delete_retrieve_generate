@@ -248,18 +248,26 @@ else:
         # writer.add_scalar('eval/loss', dev_loss, epoch)
 
         if args.bleu and epoch >= config['training'].get('inference_start_epoch', 1):
+            ### Get the generate data for the neg -> positive translation
             cur_metric, edit_distance, inputs, preds, golds, auxs = evaluation.inference_metrics(
-                model, src_test, tgt_test, config)
+                model, src_test, tgt_test, config, is_test=1)
 
-            with open(working_dir + '/auxs.%s' % epoch, 'w') as f:
+            with open(working_dir + '/auxs_1.%s' % epoch, 'w') as f:
                 f.write('\n'.join(auxs) + '\n')
-            with open(working_dir + '/inputs.%s' % epoch, 'w') as f:
+            with open(working_dir + '/inputs_1.%s' % epoch, 'w') as f:
                 f.write('\n'.join(inputs) + '\n')
-            with open(working_dir + '/preds.%s' % epoch, 'w') as f:
+            with open(working_dir + '/preds_1.%s' % epoch, 'w') as f:
                 f.write('\n'.join(preds) + '\n')
-            with open(working_dir + '/golds.%s' % epoch, 'w') as f:
+            with open(working_dir + '/golds_1.%s' % epoch, 'w') as f:
                 f.write('\n'.join(golds) + '\n')
-
+            # Get the generated data for the pos -> neg translation
+            cur_metric, edit_distance, inputs, preds, golds, auxs = evaluation.inference_metrics(
+                model, src_test, tgt_test, config, is_test=0)
+            
+            with open(working_dir + '/auxs_0.%s' % epoch, 'w') as f:
+                f.write('\n'.join(auxs) + '\n')
+            with open(working_dir + '/preds_0.%s' % epoch, 'w') as f:
+                f.write('\n'.join(preds) + '\n')
             # writer.add_scalar('eval/edit_distance', edit_distance, epoch)
             # writer.add_scalar('eval/bleu', cur_metric, epoch)
 

@@ -83,7 +83,7 @@ def decode_minibatch(max_len, start_id, model, src_input, srclens, srcmask,
 
     return tgt_input
 
-def decode_dataset(model, src, tgt, config):
+def decode_dataset(model, src, tgt, config, is_test):
     """Evaluate model."""
     inputs = []
     preds = []
@@ -99,7 +99,7 @@ def decode_dataset(model, src, tgt, config):
             config['data']['batch_size'], 
             config['data']['max_len'], 
             config['model']['model_type'],
-            is_test=True)
+            is_test=is_test)
         input_lines_src, output_lines_src, srclens, srcmask, indices = input_content
         input_ids_aux, _, auxlens, auxmask, _ = input_aux
         input_lines_tgt, output_lines_tgt, _, _, _ = output
@@ -141,10 +141,10 @@ def decode_dataset(model, src, tgt, config):
     return inputs, preds, ground_truths, auxs
 
 
-def inference_metrics(model, src, tgt, config):
+def inference_metrics(model, src, tgt, config, is_test=0):
     """ decode and evaluate bleu """
     inputs, preds, ground_truths, auxs = decode_dataset(
-        model, src, tgt, config)
+        model, src, tgt, config, is_test)
 
     bleu = get_bleu(preds, ground_truths)
     edit_distance = get_edit_distance(preds, ground_truths)

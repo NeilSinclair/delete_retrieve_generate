@@ -303,17 +303,22 @@ def get_minibatch(lines, tok2id, index, batch_size, max_len, sort=False, idx=Non
     return input_lines, output_lines, lens, mask, idx
 
 
-def minibatch(src, tgt, idx, batch_size, max_len, model_type, is_test=False, gen_sim_matrix=False,
+def minibatch(src, tgt, idx, batch_size, max_len, model_type, is_test=2, gen_sim_matrix=False,
               use_sim_matrix=False, sim_lookup_table=None):
-    if not is_test:
+    if is_test == 2:
         use_src = random.random() < 0.5
         in_dataset = src if use_src else tgt
         out_dataset = in_dataset
         attribute_id = 0 if use_src else 1
-    else:
+    elif is_test == 1:
         in_dataset = src
         out_dataset = tgt
         attribute_id = 1
+    else:
+        in_dataset = tgt
+        out_dataset = src
+        attribute_id = 0
+        
 
     if model_type == 'delete':
         inputs = get_minibatch(
